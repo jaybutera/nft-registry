@@ -35,15 +35,9 @@ decl_event! {
         <T as system::Trait>::Hash,
     {
         Created(AccountId, Hash),
+        Mint(AccountId, Hash),
     }
 }
-
-/* Coffee shop haiku
- *
- *  endless persistence
- *  extracting blood from my arm
- *  the little fucker
-*/
 
 decl_storage!{
     trait Store for Module<T: Trait> as Nfttest {
@@ -81,6 +75,30 @@ decl_module! {
             Ok(())
         }
 
+        /*
+        fn upload_validation_contract(
+            origin,
+            gas: T::Gas) -> Result
+        {
+            let sender = ensure_signed(origin)?;
+
+            // Store bytecode
+            let codehash = <contract::Module<T>>::put_code(
+                T::Origin::from(RawOrigin::<T::AccountId>::Signed(sender.clone())),
+                gas,
+                //<T::Gas as As<u32>>::sa(210000),
+                bytecode)?;
+
+            // Initialize contract
+            <contract::Module<T>>::create(
+                T::Origin::from(RawOrigin::<T::AccountId>::Signed(sender.clone())),
+                value,
+                gas,
+                codehash,
+                data)?;
+        }
+        */
+
         fn mint(origin,
                 uid: T::Hash,
                 parameters: Vec<u8>,            // To be passed into the smart contract
@@ -106,8 +124,10 @@ decl_module! {
                 gas_limit,
                 parameters)?;
 
+            // Create NFT if validation succeeds
 
             // Emit event
+            Self::deposit_event(RawEvent::Mint(sender, uid));
 
             Ok(())
         }
