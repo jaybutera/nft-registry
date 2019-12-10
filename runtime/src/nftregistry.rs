@@ -118,7 +118,7 @@ decl_module! {
 
             // TODO: How to determine if validation succeeds?
             <contract::Module<T>>::call(
-                T::Origin::from(RawOrigin::<T::AccountId>::Signed(sender)),
+                T::Origin::from(RawOrigin::<T::AccountId>::Signed(sender.clone())),
                 T::Lookup::unlookup(validation_fn),
                 value,
                 gas_limit,
