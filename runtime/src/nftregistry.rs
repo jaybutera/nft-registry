@@ -153,7 +153,7 @@ decl_module! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use support::{impl_outer_origin, assert_ok};
+    use support::{impl_outer_origin, impl_outer_event, impl_outer_dispatch, assert_ok};
     use runtime_io::{with_externalities, TestExternalities};
     use primitives::{H256, Blake2Hasher, sr25519};
     use runtime_primitives::{
@@ -161,12 +161,37 @@ mod tests {
         testing::{Digest, DigestItem, Header}
     };
 
+    mod nftregistry {
+        // Re-export contents of the root. This basically
+        // needs to give a name for the current crate.
+        // This hack is required for `impl_outer_event!`.
+        pub use super::super::*;
+        use support::impl_outer_event;
+    }
+
     #[derive(Eq, Clone, PartialEq)]
     pub struct NftRegistryTest;
 
     impl_outer_origin! {
         pub enum Origin for NftRegistryTest {}
     }
+
+    impl_outer_event! {
+        pub enum MetaEvent for NftRegistryTest {
+            balances<T>, contract<T>, nftregistry<T>,
+        }
+    }
+
+    /*
+    use crate::{Balances, Contract, NftRegistry};
+    impl_outer_dispatch! {
+        pub enum Call for Test where origin: Origin {
+            balances::Balances,
+            contract::Contract,
+            nftregistry::NftRegistry,
+        }
+    }
+    */
 
     impl system::Trait for NftRegistryTest {
         type Origin = Origin;
@@ -178,7 +203,7 @@ mod tests {
         type AccountId = super::super::AccountId;
         type Lookup = IdentityLookup<Self::AccountId>;
         type Header = Header;
-        type Event = ();
+        type Event = MetaEvent;
         type Log = DigestItem;
     }
 
@@ -186,7 +211,7 @@ mod tests {
         type Balance = u64;
         type OnFreeBalanceZero = ();
         type OnNewAccount = ();
-        type Event = ();
+        type Event = MetaEvent;
         type TransactionPayment = ();
         type TransferPayment = ();
         type DustRemoval = ();
@@ -200,7 +225,7 @@ mod tests {
     impl contract::Trait for NftRegistryTest {
         type Currency = crate::Balances;
         type Call = contract::Call<NftRegistryTest>;
-        type Event = ();
+        type Event = MetaEvent;
         type Gas = u64;
         type DetermineContractAddress = contract::SimpleAddressDeterminator<NftRegistryTest>;
         type ComputeDispatchFee = contract::DefaultDispatchFeeComputor<NftRegistryTest>;
@@ -209,7 +234,7 @@ mod tests {
     }
 
     impl super::Trait for NftRegistryTest {
-        type Event = ();
+        type Event = MetaEvent;
     }
 
     type NftReg = super::Module<NftRegistryTest>;
@@ -217,7 +242,23 @@ mod tests {
     fn build_ext() -> TestExternalities<Blake2Hasher> {
         let mut t = system::GenesisConfig::<NftRegistryTest>::default().build_storage().unwrap().0;
         t.extend(balances::GenesisConfig::<NftRegistryTest>::default().build_storage().unwrap().0);
+        t.extend(contract::GenesisConfig::<NftRegistryTest>::default().build_storage().unwrap().0);
         t.into()
+    }
+
+    // TODO: Should return a Result to indicate failure/success
+    fn init_contract(origin: Origin) {
+        use std::{io, io::prelude::*, fs::File};
+        use std::path::Path;
+
+        // Get the wasm contract byte code from a file
+        let mut f = File::open(Path::new("./test_wasm/testcontract.wasm"))
+            .expect("Failed to open contract file");
+        let mut bytecode = Vec::new();
+        f.read_to_end(&mut bytecode);
+
+        // Store code on chain
+        <contract::Module<NftRegistryTest>>::put_code(origin, 200_000 as u64, bytecode);
     }
 
     #[test]
@@ -225,10 +266,18 @@ mod tests {
         with_externalities(&mut build_ext(), || {
             let h1 = sr25519::Public::from_h256((1).using_encoded(<NftRegistryTest as system::Trait>::Hashing::hash));
             let h2 = sr25519::Public::from_h256((2).using_encoded(<NftRegistryTest as system::Trait>::Hashing::hash));
+            let origin = Origin::signed(h1);
+
+            init_contract( origin.clone() );
 
             assert_ok!(
-                NftReg::new_registry(Origin::signed(h1),h2)
+                NftReg::new_registry(origin,h2)
             );
+
+            println!("Event log:");
+            for e in &<system::Module<NftRegistryTest>>::events() {
+                println!("{:?}", e);
+            }
         });
     }
 }
