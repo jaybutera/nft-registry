@@ -22,6 +22,8 @@ use parity_codec::{Encode, Decode};
 use system::{ensure_signed, RawOrigin};
 use runtime_primitives::traits::StaticLookup;
 
+//use crate::wasm::ExecutionContext;
+
 use rstd::prelude::*;
 
 pub trait Trait: balances::Trait + contract::Trait  {
@@ -116,13 +118,27 @@ decl_module! {
             let validation_fn = Self::validator_of(&uid)
                 .ok_or("This should not happen bcs ensure above^")?;
 
-            // TODO: How to determine if validation succeeds?
+            // Wasm contract should emit an event for success or failure
             <contract::Module<T>>::call(
                 T::Origin::from(RawOrigin::<T::AccountId>::Signed(sender.clone())),
                 T::Lookup::unlookup(validation_fn),
                 value,
                 gas_limit,
                 parameters)?;
+
+            // Check event log to see if validation succeeded
+            let events = <system::Module<T>>::events();
+
+            // TODO: Iterate in reverse bcs event should be at or near the end
+            /*
+            events.filter(|e|
+                match e.event {
+                    RawEvent::ValidationSuccess(..) => ,
+                    RawEvent::ValidationFailure(..) => ,
+                    _ => false,
+                }
+            });
+            */
 
             // Create NFT if validation succeeds
 
@@ -131,5 +147,88 @@ decl_module! {
 
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use support::{impl_outer_origin, assert_ok};
+    use runtime_io::{with_externalities, TestExternalities};
+    use primitives::{H256, Blake2Hasher, sr25519};
+    use runtime_primitives::{
+        BuildStorage, traits::{BlakeTwo256, IdentityLookup},
+        testing::{Digest, DigestItem, Header}
+    };
+
+    #[derive(Eq, Clone, PartialEq)]
+    pub struct NftRegistryTest;
+
+    impl_outer_origin! {
+        pub enum Origin for NftRegistryTest {}
+    }
+
+    impl system::Trait for NftRegistryTest {
+        type Origin = Origin;
+        type Index = u64;
+        type BlockNumber = u64;
+        type Hash = H256;
+        type Hashing = BlakeTwo256;
+        type Digest = Digest;
+        type AccountId = super::super::AccountId;
+        type Lookup = IdentityLookup<Self::AccountId>;
+        type Header = Header;
+        type Event = ();
+        type Log = DigestItem;
+    }
+
+    impl balances::Trait for NftRegistryTest {
+        type Balance = u64;
+        type OnFreeBalanceZero = ();
+        type OnNewAccount = ();
+        type Event = ();
+        type TransactionPayment = ();
+        type TransferPayment = ();
+        type DustRemoval = ();
+    }
+
+    impl timestamp::Trait for NftRegistryTest {
+        type Moment = u64;
+        type OnTimestampSet = ();
+    }
+
+    impl contract::Trait for NftRegistryTest {
+        type Currency = crate::Balances;
+        type Call = contract::Call<NftRegistryTest>;
+        type Event = ();
+        type Gas = u64;
+        type DetermineContractAddress = contract::SimpleAddressDeterminator<NftRegistryTest>;
+        type ComputeDispatchFee = contract::DefaultDispatchFeeComputor<NftRegistryTest>;
+        type TrieIdGenerator = contract::TrieIdFromParentCounter<NftRegistryTest>;
+        type GasPayment = ();
+    }
+
+    impl super::Trait for NftRegistryTest {
+        type Event = ();
+    }
+
+    type NftReg = super::Module<NftRegistryTest>;
+
+    fn build_ext() -> TestExternalities<Blake2Hasher> {
+        let mut t = system::GenesisConfig::<NftRegistryTest>::default().build_storage().unwrap().0;
+        t.extend(balances::GenesisConfig::<NftRegistryTest>::default().build_storage().unwrap().0);
+        t.into()
+    }
+
+    #[test]
+    fn create_nft_registry() {
+        with_externalities(&mut build_ext(), || {
+            let h1 = sr25519::Public::from_h256((1).using_encoded(<NftRegistryTest as system::Trait>::Hashing::hash));
+            let h2 = sr25519::Public::from_h256((2).using_encoded(<NftRegistryTest as system::Trait>::Hashing::hash));
+
+            assert_ok!(
+                NftReg::new_registry(Origin::signed(h1),h2)
+            );
+        });
     }
 }
