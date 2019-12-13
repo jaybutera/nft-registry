@@ -258,7 +258,18 @@ mod tests {
         f.read_to_end(&mut bytecode);
 
         // Store code on chain
-        <contract::Module<NftRegistryTest>>::put_code(origin, 200_000 as u64, bytecode);
+        <contract::Module<NftRegistryTest>>::put_code(origin.clone(), 200_000 as u64, bytecode);
+
+        // Get codehash from event log
+        let codehash_event = <system::Module<NftRegistryTest>>::events().pop()
+            .expect("An event should be in the log but its not");
+        let codehash = match codehash_event.event {
+            MetaEvent::contract(contract::RawEvent::CodeStored(hash)) => Some(hash),
+            _ => None,
+        }.expect("Popped event is not a 'CodeStored'");
+
+        // Initialize as contract
+        <contract::Module<NftRegistryTest>>::create(origin, 0, 200_000, codehash, vec![]);
     }
 
     #[test]
