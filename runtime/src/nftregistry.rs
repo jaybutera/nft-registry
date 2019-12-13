@@ -242,34 +242,53 @@ mod tests {
     fn build_ext() -> TestExternalities<Blake2Hasher> {
         let mut t = system::GenesisConfig::<NftRegistryTest>::default().build_storage().unwrap().0;
         t.extend(balances::GenesisConfig::<NftRegistryTest>::default().build_storage().unwrap().0);
+
+        let h1 = sr25519::Public::from_h256((1).using_encoded(<NftRegistryTest as system::Trait>::Hashing::hash));
+        let h2 = sr25519::Public::from_h256((2).using_encoded(<NftRegistryTest as system::Trait>::Hashing::hash));
+        let endowed_accounts = vec![h1, h2];
+
+        t.extend(balances::GenesisConfig::<NftRegistryTest> {
+            transaction_base_fee: 1,
+            transaction_byte_fee: 0,
+            existential_deposit: 500,
+            transfer_fee: 0,
+            creation_fee: 0,
+            balances: endowed_accounts.iter().cloned().map(|k|(k, 1 << 60)).collect(),
+            vesting: vec![],
+        }.build_storage().unwrap().0);
         t.extend(contract::GenesisConfig::<NftRegistryTest>::default().build_storage().unwrap().0);
         t.into()
     }
 
-    // TODO: Should return a Result to indicate failure/success
-    fn init_contract(origin: Origin) {
+    fn init_contract(origin: Origin) -> Result {
         use std::{io, io::prelude::*, fs::File};
         use std::path::Path;
 
         // Get the wasm contract byte code from a file
         let mut f = File::open(Path::new("./test_wasm/testcontract.wasm"))
-            .expect("Failed to open contract file");
-        let mut bytecode = Vec::new();
-        f.read_to_end(&mut bytecode);
+            .map_err(|_| "Failed to open contract file")?;
+        let mut bytecode = Vec::<u8>::new();
+        f.read_to_end(&mut bytecode)
+            .map_err(|_| "Didn't read to end of file")?;
 
         // Store code on chain
-        <contract::Module<NftRegistryTest>>::put_code(origin.clone(), 200_000 as u64, bytecode);
+        <contract::Module<NftRegistryTest>>::put_code(
+            origin.clone(),
+            100_000,
+            bytecode
+            //0x14144020u32.to_le_bytes().to_vec()
+            )?;
 
         // Get codehash from event log
         let codehash_event = <system::Module<NftRegistryTest>>::events().pop()
-            .expect("An event should be in the log but its not");
+            .ok_or("An event should be in the log but its not")?;
         let codehash = match codehash_event.event {
             MetaEvent::contract(contract::RawEvent::CodeStored(hash)) => Some(hash),
             _ => None,
-        }.expect("Popped event is not a 'CodeStored'");
+        }.ok_or("Latest event is not a CodeStored event")?;
 
         // Initialize as contract
-        <contract::Module<NftRegistryTest>>::create(origin, 0, 200_000, codehash, vec![]);
+        <contract::Module<NftRegistryTest>>::create(origin, 0, 200_000, codehash, vec![])
     }
 
     #[test]
@@ -277,7 +296,9 @@ mod tests {
         with_externalities(&mut build_ext(), || {
             let h1 = sr25519::Public::from_h256((1).using_encoded(<NftRegistryTest as system::Trait>::Hashing::hash));
             let h2 = sr25519::Public::from_h256((2).using_encoded(<NftRegistryTest as system::Trait>::Hashing::hash));
-            let origin = Origin::signed(h1);
+            let origin = Origin::signed(h1.clone());
+
+            println!("Free bal: {}", <balances::Module<NftRegistryTest>>::free_balance(&h1.clone()));
 
             init_contract( origin.clone() );
 
