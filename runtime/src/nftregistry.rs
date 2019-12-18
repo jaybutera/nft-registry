@@ -21,6 +21,7 @@ use runtime_primitives::traits::{As, Hash};
 use parity_codec::{Encode, Decode};
 use system::{ensure_signed, RawOrigin};
 use runtime_primitives::traits::StaticLookup;
+use super::Event as OuterEvent;
 
 //use crate::wasm::ExecutionContext;
 
@@ -117,11 +118,14 @@ decl_module! {
             // Run custom validation
             let validation_fn = Self::validator_of(&uid)
                 .ok_or("This should not happen bcs ensure above^")?;
+            //let contract_addr = T::Lookup::unlookup(validation_fn);
 
             // Wasm contract should emit an event for success or failure
             <contract::Module<T>>::call(
+                // Origin::signed( sender.clone() ),
                 T::Origin::from(RawOrigin::<T::AccountId>::Signed(sender.clone())),
-                T::Lookup::unlookup(validation_fn),
+                //contract_addr.clone(),
+                T::Lookup::unlookup(validation_fn.clone()),
                 value,
                 gas_limit,
                 parameters)?;
@@ -129,16 +133,16 @@ decl_module! {
             // Check event log to see if validation succeeded
             let events = <system::Module<T>>::events();
 
-            // TODO: Iterate in reverse bcs event should be at or near the end
-            /*
-            events.filter(|e|
+            type SystemEvent<T> = <T as system::Trait>::Event;
+
+            // TODO: Make iterate in reverse efficient, bcs event should be at or near the end
+            events.iter().rev().find(|e| {
                 match e.event {
-                    RawEvent::ValidationSuccess(..) => ,
-                    RawEvent::ValidationFailure(..) => ,
+                    //SystemEvent::<T>::contract( contract::RawEvent::Contract(acct_id, ..) ) => acct_id == validation_fn,
+                    SystemEvent::<T>::contract{..} => true,
                     _ => false,
                 }
             });
-            */
 
             // Create NFT if validation succeeds
 
@@ -300,7 +304,7 @@ mod tests {
 
             println!("Free bal: {}", <balances::Module<NftRegistryTest>>::free_balance(&h1.clone()));
 
-            init_contract( origin.clone() );
+            //init_contract( origin.clone() );
 
             assert_ok!(
                 NftReg::new_registry(origin,h2)
