@@ -27,6 +27,12 @@ use super::Event as OuterEvent;
 
 use rstd::prelude::*;
 
+struct NftContract;
+
+// A unique id for a NFT type (not an NFT instance). This is used to track different classes of
+// NFTs in the NFT registry
+type NftUid<T> = T::Hash;
+
 pub trait Trait: balances::Trait + contract::Trait  {
     type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
 }
@@ -44,7 +50,10 @@ decl_event! {
 
 decl_storage!{
     trait Store for Module<T: Trait> as Nfttest {
-        ValidationFn get(validator_of): map T::Hash => Option<T::AccountId>;
+        ValidationFn get(validator_of): map NftUid<T> => Option<T::AccountId>;
+        // TODO: need a generic enough type to represent any possible contract
+        // NftRegistry get(contract_of): map NftUid<T> => 
+        NftInstance: map T::Hash => NftContract;
         Nonce: u64;
     }
 }
@@ -130,6 +139,7 @@ decl_module! {
                 gas_limit,
                 parameters)?;
 
+            /*
             // Check event log to see if validation succeeded
             let events = <system::Module<T>>::events();
 
@@ -138,16 +148,25 @@ decl_module! {
             // TODO: Make iterate in reverse efficient, bcs event should be at or near the end
             events.iter().rev().find(|e| {
                 match e.event {
-                    //SystemEvent::<T>::contract( contract::RawEvent::Contract(acct_id, ..) ) => acct_id == validation_fn,
-                    SystemEvent::<T>::contract{..} => true,
+                    SystemEvent::<T>::contract( contract::RawEvent::Contract(acct_id, ..) ) => acct_id == validation_fn,
+                    //SystemEvent::<T>::contract{..} => true,
                     _ => false,
                 }
             });
+            */
 
-            // Create NFT if validation succeeds
+            Ok(())
+        }
 
-            // Emit event
-            Self::deposit_event(RawEvent::Mint(sender, uid));
+        fn finish_mint(origin, uid: &NftUid<T>) -> Result {
+            let sender = ensure_signed(origin)?;
+
+            // Ensure the caller is the validation contract for the corresponding NFT class
+            ensure!(Self::validator_of(uid)
+                        .and_then(|validator_addr| validator_addr == sender) );
+
+            // Mint the nft
+            //<Contract<T>::insert(uid, contract);
 
             Ok(())
         }
