@@ -8,7 +8,7 @@
 /// For more guidance on Substrate modules, see the example module
 /// https://github.com/paritytech/substrate/blob/master/srml/example/src/lib.rs
 
-use support::{
+use frame_support::{
     decl_module,
     ensure,
     decl_storage,
@@ -17,23 +17,24 @@ use support::{
     StorageMap,
     traits::Currency,
     dispatch::Result};
-use runtime_primitives::traits::{As, Hash};
-use parity_codec::{Encode, Decode};
+//use runtime_primitives::traits::{As, Hash};
+//use sp_runtime::traits::{As, Hash, StaticLookup};
+//use parity_codec::{Encode, Decode};
 use system::{ensure_signed, RawOrigin};
-use runtime_primitives::traits::StaticLookup;
-use super::Event as OuterEvent;
+//use runtime_primitives::traits::StaticLookup;
+//use crate::Event;
 
 //use crate::wasm::ExecutionContext;
 
-use rstd::prelude::*;
+use sp_std::prelude::*;
 
 struct NftContract;
 
-// A unique id for a NFT type (not an NFT instance). This is used to track different classes of
-// NFTs in the NFT registry
-type NftUid<T> = T::Hash;
+// A unique id for a NFT type (not an NFT instance)
+//type RegistryUid<T: Trait> = T::Hash;
+type RegistryUid = u64;
 
-pub trait Trait: balances::Trait + contract::Trait  {
+pub trait Trait: balances::Trait + contracts::Trait  {
     type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
 }
 
@@ -43,46 +44,44 @@ decl_event! {
         <T as system::Trait>::AccountId,
         <T as system::Trait>::Hash,
     {
-        Created(AccountId, Hash),
+        NewRegistry(AccountId, RegistryUid),
         Mint(AccountId, Hash),
     }
 }
 
 decl_storage!{
     trait Store for Module<T: Trait> as Nfttest {
-        ValidationFn get(validator_of): map NftUid<T> => Option<T::AccountId>;
+        ValidationFn get(validator_of): map RegistryUid => Option<T::AccountId>;
         // TODO: need a generic enough type to represent any possible contract
-        // NftRegistry get(contract_of): map NftUid<T> => 
-        NftInstance: map T::Hash => NftContract;
+        // NftRegistry get(contract_of): map RegistryUid<T> => 
+        //NftInstance: map T::Hash => NftContract;
         Nonce: u64;
     }
 }
 
 decl_module! {
     pub struct Module<T: Trait> for enum Call where origin: T::Origin {
-        fn deposit_event<T>() = default;
+        fn deposit_event() = default;
 
         fn new_registry(origin, validation_fn_addr: T::AccountId) -> Result {
             let sender = ensure_signed(origin)?;
 
-            // Get some randomness
-            let rnd_seed = <system::Module<T>>::random_seed();
-            let nonce = <Nonce<T>>::get();
-
             // Generate a uid and check that it's unique
-            let uid = (rnd_seed, sender.clone(), nonce).using_encoded(<T as system::Trait>::Hashing::hash);
-            ensure!(!<ValidationFn<T>>::exists(uid), "This new id for a registry already exists!");
+            let nonce = <Nonce>::get();
+            let uid = nonce;
+            //let uid = (nonce).using_encoded(<T as system::Trait>::Hashing::hash);
+            //ensure!(!<ValidationFn<T>>::exists(uid), "This new id for a registry already exists!");
 
             // Check for overflow on index
-            let nplus1 = <Nonce<T>>::get().checked_add(1)
+            let nplus1 = <Nonce>::get().checked_add(1)
                 .ok_or("Nonce overflow when adding a new registry")?;
 
             // Write state
             <ValidationFn<T>>::insert(&uid, validation_fn_addr);
-            <Nonce<T>>::put( nplus1 );
+            <Nonce>::put( nplus1 );
 
             // Events
-            Self::deposit_event(RawEvent::Created(sender, uid));
+            Self::deposit_event(RawEvent::NewRegistry(sender, uid));
 
             Ok(())
         }
@@ -111,11 +110,12 @@ decl_module! {
         }
         */
 
+        /*
         fn mint(origin,
                 uid: T::Hash,
                 parameters: Vec<u8>,            // To be passed into the smart contract
-                value: contract::BalanceOf<T>,  // If currency needs to be passed to contract
-                gas_limit: T::Gas) -> Result
+                value: contracts::BalanceOf<T>,  // If currency needs to be passed to contract
+                gas_limit: <T as contracts::Trait>::BlockGasLimit) -> Result
         {
             // TODO: Needs to ensure signed before anything else
             let sender = ensure_signed(origin)?;
@@ -127,49 +127,33 @@ decl_module! {
             // Run custom validation
             let validation_fn = Self::validator_of(&uid)
                 .ok_or("This should not happen bcs ensure above^")?;
-            //let contract_addr = T::Lookup::unlookup(validation_fn);
 
             // Wasm contract should emit an event for success or failure
-            <contract::Module<T>>::call(
+            <contracts::Module<T>>::call(
                 // Origin::signed( sender.clone() ),
                 T::Origin::from(RawOrigin::<T::AccountId>::Signed(sender.clone())),
-                //contract_addr.clone(),
                 T::Lookup::unlookup(validation_fn.clone()),
                 value,
                 gas_limit,
                 parameters)?;
 
-            /*
-            // Check event log to see if validation succeeded
-            let events = <system::Module<T>>::events();
-
-            type SystemEvent<T> = <T as system::Trait>::Event;
-
-            // TODO: Make iterate in reverse efficient, bcs event should be at or near the end
-            events.iter().rev().find(|e| {
-                match e.event {
-                    SystemEvent::<T>::contract( contract::RawEvent::Contract(acct_id, ..) ) => acct_id == validation_fn,
-                    //SystemEvent::<T>::contract{..} => true,
-                    _ => false,
-                }
-            });
-            */
-
             Ok(())
         }
 
-        fn finish_mint(origin, uid: &NftUid<T>) -> Result {
+        fn finish_mint(origin, uid: RegistryUid<T>) -> Result {
             let sender = ensure_signed(origin)?;
 
             // Ensure the caller is the validation contract for the corresponding NFT class
-            ensure!(Self::validator_of(uid)
-                        .and_then(|validator_addr| validator_addr == sender) );
+            ensure!(Self::validator_of(&uid)
+                        .and_then(|validator_addr| validator_addr == sender),
+                        "Sender must be validator contract for this Nft registry");
 
             // Mint the nft
             //<Contract<T>::insert(uid, contract);
 
             Ok(())
         }
+        */
     }
 }
 
@@ -201,7 +185,7 @@ mod tests {
 
     impl_outer_event! {
         pub enum MetaEvent for NftRegistryTest {
-            balances<T>, contract<T>, nftregistry<T>,
+            balances<T>, contracts<T>, nftregistry<T>,
         }
     }
 
@@ -245,14 +229,14 @@ mod tests {
         type OnTimestampSet = ();
     }
 
-    impl contract::Trait for NftRegistryTest {
+    impl contracts::Trait for NftRegistryTest {
         type Currency = crate::Balances;
-        type Call = contract::Call<NftRegistryTest>;
+        type Call = contracts::Call<NftRegistryTest>;
         type Event = MetaEvent;
         type Gas = u64;
-        type DetermineContractAddress = contract::SimpleAddressDeterminator<NftRegistryTest>;
-        type ComputeDispatchFee = contract::DefaultDispatchFeeComputor<NftRegistryTest>;
-        type TrieIdGenerator = contract::TrieIdFromParentCounter<NftRegistryTest>;
+        type DetermineContractAddress = contracts::SimpleAddressDeterminator<NftRegistryTest>;
+        type ComputeDispatchFee = contracts::DefaultDispatchFeeComputor<NftRegistryTest>;
+        type TrieIdGenerator = contracts::TrieIdFromParentCounter<NftRegistryTest>;
         type GasPayment = ();
     }
 
@@ -279,7 +263,7 @@ mod tests {
             balances: endowed_accounts.iter().cloned().map(|k|(k, 1 << 60)).collect(),
             vesting: vec![],
         }.build_storage().unwrap().0);
-        t.extend(contract::GenesisConfig::<NftRegistryTest>::default().build_storage().unwrap().0);
+        t.extend(contracts::GenesisConfig::<NftRegistryTest>::default().build_storage().unwrap().0);
         t.into()
     }
 
@@ -295,7 +279,7 @@ mod tests {
             .map_err(|_| "Didn't read to end of file")?;
 
         // Store code on chain
-        <contract::Module<NftRegistryTest>>::put_code(
+        <contracts::Module<NftRegistryTest>>::put_code(
             origin.clone(),
             100_000,
             bytecode
@@ -306,12 +290,12 @@ mod tests {
         let codehash_event = <system::Module<NftRegistryTest>>::events().pop()
             .ok_or("An event should be in the log but its not")?;
         let codehash = match codehash_event.event {
-            MetaEvent::contract(contract::RawEvent::CodeStored(hash)) => Some(hash),
+            MetaEvent::contracts(contracts::RawEvent::CodeStored(hash)) => Some(hash),
             _ => None,
         }.ok_or("Latest event is not a CodeStored event")?;
 
         // Initialize as contract
-        <contract::Module<NftRegistryTest>>::create(origin, 0, 200_000, codehash, vec![])
+        <contracts::Module<NftRegistryTest>>::create(origin, 0, 200_000, codehash, vec![])
     }
 
     #[test]
