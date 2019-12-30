@@ -15,10 +15,9 @@ use frame_support::{
     decl_event,
     StorageValue,
     StorageMap,
-    traits::Currency,
     dispatch::Result};
 //use runtime_primitives::traits::{As, Hash};
-//use sp_runtime::traits::{As, Hash, StaticLookup};
+use sp_runtime::traits::{StaticLookup};
 //use parity_codec::{Encode, Decode};
 use system::{ensure_signed, RawOrigin};
 //use runtime_primitives::traits::StaticLookup;
@@ -110,12 +109,11 @@ decl_module! {
         }
         */
 
-        /*
         fn mint(origin,
-                uid: T::Hash,
+                uid: RegistryUid,
                 parameters: Vec<u8>,            // To be passed into the smart contract
                 value: contracts::BalanceOf<T>,  // If currency needs to be passed to contract
-                gas_limit: <T as contracts::Trait>::BlockGasLimit) -> Result
+                gas_limit: contracts::Gas) -> Result
         {
             // TODO: Needs to ensure signed before anything else
             let sender = ensure_signed(origin)?;
@@ -125,7 +123,7 @@ decl_module! {
             // Run merkle validation
 
             // Run custom validation
-            let validation_fn = Self::validator_of(&uid)
+            let validation_fn = Self::validator_of(uid)
                 .ok_or("This should not happen bcs ensure above^")?;
 
             // Wasm contract should emit an event for success or failure
@@ -140,12 +138,12 @@ decl_module! {
             Ok(())
         }
 
-        fn finish_mint(origin, uid: RegistryUid<T>) -> Result {
+        fn finish_mint(origin, uid: RegistryUid) -> Result {
             let sender = ensure_signed(origin)?;
 
             // Ensure the caller is the validation contract for the corresponding NFT class
             ensure!(Self::validator_of(&uid)
-                        .and_then(|validator_addr| validator_addr == sender),
+                        .map_or(false, |validator_addr| validator_addr == sender),
                         "Sender must be validator contract for this Nft registry");
 
             // Mint the nft
@@ -153,7 +151,6 @@ decl_module! {
 
             Ok(())
         }
-        */
     }
 }
 
