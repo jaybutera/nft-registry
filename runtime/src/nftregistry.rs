@@ -16,14 +16,8 @@ use frame_support::{
     StorageValue,
     StorageMap,
     dispatch::Result};
-//use runtime_primitives::traits::{As, Hash};
-use sp_runtime::traits::{StaticLookup};
-//use parity_codec::{Encode, Decode};
+use sp_runtime::traits::StaticLookup;
 use system::{ensure_signed, RawOrigin};
-//use runtime_primitives::traits::StaticLookup;
-//use crate::Event;
-
-//use crate::wasm::ExecutionContext;
 
 use sp_std::prelude::*;
 
@@ -32,6 +26,7 @@ struct NftContract;
 // A unique id for a NFT type (not an NFT instance)
 //type RegistryUid<T: Trait> = T::Hash;
 type RegistryUid = u64;
+type NftUid = u64;
 
 pub trait Trait: balances::Trait + contracts::Trait  {
     type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
@@ -41,20 +36,19 @@ decl_event! {
     pub enum Event<T>
     where
         <T as system::Trait>::AccountId,
-        <T as system::Trait>::Hash,
+        //<T as system::Trait>::Hash,
     {
         NewRegistry(AccountId, RegistryUid),
-        Mint(AccountId, Hash),
+        MintNft(RegistryUid, NftUid),
     }
 }
 
-decl_storage!{
+decl_storage! {
     trait Store for Module<T: Trait> as Nfttest {
         ValidationFn get(validator_of): map RegistryUid => Option<T::AccountId>;
-        // TODO: need a generic enough type to represent any possible contract
-        // NftRegistry get(contract_of): map RegistryUid<T> => 
-        //NftInstance: map T::Hash => NftContract;
         Nonce: u64;
+        // Should this be optional?
+        RegistryNonce: map RegistryUid => u64;
     }
 }
 
@@ -146,8 +140,17 @@ decl_module! {
                         .map_or(false, |validator_addr| validator_addr == sender),
                         "Sender must be validator contract for this Nft registry");
 
-            // Mint the nft
-            //<Contract<T>::insert(uid, contract);
+            // Assign Nft uid
+            let nft_uid = <RegistryNonce>::get(&uid);
+
+            let nplus1 = nft_uid.checked_add(1)
+                .ok_or("Overflow when incrementing registry nonce")?;
+
+            // Increment nonce
+            <RegistryNonce>::insert(uid, nplus1);
+
+            // Just emit an event
+            Self::deposit_event(RawEvent::MintNft(uid, nft_uid));
 
             Ok(())
         }
@@ -304,7 +307,7 @@ mod tests {
 
             println!("Free bal: {}", <balances::Module<NftRegistryTest>>::free_balance(&h1.clone()));
 
-            //init_contract( origin.clone() );
+            init_contract( origin.clone() );
 
             assert_ok!(
                 NftReg::new_registry(origin,h2)
