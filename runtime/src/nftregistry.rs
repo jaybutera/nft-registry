@@ -173,6 +173,7 @@ mod tests {
         Perbill,
     };
     use sp_version::RuntimeVersion;
+    use contracts::{TrieIdGenerator, TrieId, ComputeDispatchFee, ContractAddressFor, AccountCounter};
 
     mod nftregistry {
         // Re-export contents of the root. This basically
@@ -214,7 +215,7 @@ mod tests {
 
     impl system::Trait for NftRegistryTest {
         type Call = ();
-        type AccountId = super::super::AccountId;
+        type AccountId = u64;//super::super::AccountId;
         type Lookup = IdentityLookup<Self::AccountId>;
         type Index = u64;
         type BlockNumber = BlockNumber;
@@ -346,7 +347,8 @@ mod tests {
     type Timestamp = timestamp::Module<NftRegistryTest>;
     type NftReg = super::Module<NftRegistryTest>;
     type Balances = balances::Module<NftRegistryTest>;
-    type Contract = contracts::Contract<NftRegistryTest>;
+    type Contract = contracts::Module<NftRegistryTest>;
+    type NftRegistry = super::Module<NftRegistryTest>;
 
     impl contracts::Trait for NftRegistryTest {
         //type Currency = crate::Balances;
@@ -356,9 +358,12 @@ mod tests {
         //type Call = Call<NftRegistryTest>;
         type Call = Call;
         type Event = MetaEvent;
-        type DetermineContractAddress = contracts::SimpleAddressDeterminator<NftRegistryTest>;
-        type ComputeDispatchFee = contracts::DefaultDispatchFeeComputor<NftRegistryTest>;
-        type TrieIdGenerator = contracts::TrieIdFromParentCounter<NftRegistryTest>;
+        //type DetermineContractAddress = contracts::SimpleAddressDeterminator<NftRegistryTest>;
+        type DetermineContractAddress = DummyContractAddressFor;
+        //type ComputeDispatchFee = contracts::DefaultDispatchFeeComputor<NftRegistryTest>;
+        type ComputeDispatchFee = DummyComputeDispatchFee;
+        //type TrieIdGenerator = contracts::TrieIdFromParentCounter<NftRegistryTest>;
+        type TrieIdGenerator = DummyTrieIdGenerator;
         type GasPayment = ();
         type RentPayment = ();
         type SignedClaimHandicap = SignedClaimHandicap;
@@ -383,28 +388,46 @@ mod tests {
         type Event = MetaEvent;
     }
 
-    /*
-    fn build_ext() -> TestExternalities<Blake2Hasher> {
-        let mut t = system::GenesisConfig::<NftRegistryTest>::default().build_storage().unwrap().0;
-        t.extend(balances::GenesisConfig::<NftRegistryTest>::default().build_storage().unwrap().0);
 
-        let h1 = sr25519::Public::from_h256((1).using_encoded(<NftRegistryTest as system::Trait>::Hashing::hash));
-        let h2 = sr25519::Public::from_h256((2).using_encoded(<NftRegistryTest as system::Trait>::Hashing::hash));
-        let endowed_accounts = vec![h1, h2];
-
-        t.extend(balances::GenesisConfig::<NftRegistryTest> {
-            transaction_base_fee: 1,
-            transaction_byte_fee: 0,
-            existential_deposit: 500,
-            transfer_fee: 0,
-            creation_fee: 0,
-            balances: endowed_accounts.iter().cloned().map(|k|(k, 1 << 60)).collect(),
-            vesting: vec![],
-        }.build_storage().unwrap().0);
-        t.extend(contracts::GenesisConfig::<NftRegistryTest>::default().build_storage().unwrap().0);
-        t.into()
+    pub struct DummyContractAddressFor;
+    impl ContractAddressFor<H256, u64> for DummyContractAddressFor {
+        fn contract_address_for(_code_hash: &H256, _data: &[u8], origin: &u64) -> u64 {
+            *origin + 1
+        }
     }
-    */
+
+    pub struct DummyTrieIdGenerator;
+    impl TrieIdGenerator<u64> for DummyTrieIdGenerator {
+        fn trie_id(account_id: &u64) -> TrieId {
+            use sp_core::storage::well_known_keys;
+
+            let new_seed = contracts::AccountCounter::mutate(|v| {
+                *v = v.wrapping_add(1);
+                *v
+            });
+
+            // TODO: see https://github.com/paritytech/substrate/issues/2325
+            let mut res = vec![];
+            res.extend_from_slice(well_known_keys::CHILD_STORAGE_KEY_PREFIX);
+            res.extend_from_slice(b"default:");
+            res.extend_from_slice(&new_seed.to_le_bytes());
+            res.extend_from_slice(&account_id.to_le_bytes());
+            res
+        }
+    }
+
+    pub struct DummyComputeDispatchFee;
+    impl ComputeDispatchFee<Call, u64> for DummyComputeDispatchFee {
+        fn compute_dispatch_fee(call: &Call) -> u64 {
+            69
+        }
+    }
+
+
+    const ALICE: u64 = 1;
+    const BOB: u64 = 2;
+    const CHARLIE: u64 = 3;
+    const DJANGO: u64 = 4;
 
     fn init_contract(origin: Origin) -> Result {
         use std::{io, io::prelude::*, fs::File};
@@ -439,18 +462,16 @@ mod tests {
 
     #[test]
     fn create_nft_registry() {
-        ExtBuilder::default().build().execute_with(|| {
-        //with_externalities(&mut build_ext(), || {
-            //let h1 = sr25519::Public::from_h256((1_u32).using_encoded(<NftRegistryTest as system::Trait>::Hashing::hash));
-            //let h2 = sr25519::Public::from_h256((2_u32).using_encoded(<NftRegistryTest as system::Trait>::Hashing::hash));
-            let origin = Origin::signed(h1.clone());
+        ExtBuilder::default().existential_deposit(100).build().execute_with(|| {
+            //Balances::deposit_creating(&ALICE, 100_000_000);
+            let origin = Origin::signed(ALICE);
 
-            println!("Free bal: {}", <balances::Module<NftRegistryTest>>::free_balance(&h1.clone()));
+            println!("Free bal: {}", <balances::Module<NftRegistryTest>>::free_balance(&ALICE));
 
             init_contract( origin.clone() );
 
             assert_ok!(
-                NftReg::new_registry(origin,h2)
+                NftReg::new_registry(origin,BOB)
             );
 
             println!("Event log:");
