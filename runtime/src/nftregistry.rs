@@ -44,10 +44,9 @@ decl_event! {
 }
 
 decl_storage! {
-    trait Store for Module<T: Trait> as Nfttest {
+    trait Store for Module<T: Trait> as NftRegistry {
         ValidationFn get(validator_of): map RegistryUid => Option<T::AccountId>;
         Nonce: u64;
-        // Should this be optional?
         RegistryNonce: map RegistryUid => u64;
     }
 }
@@ -159,21 +158,28 @@ decl_module! {
 
 #[cfg(test)]
 mod tests {
+    //use sp_std::prelude::*;
     use super::*;
-    use support::{impl_outer_origin, impl_outer_event, impl_outer_dispatch, assert_ok};
-    use runtime_io::{with_externalities, TestExternalities};
-    use primitives::{H256, Blake2Hasher, sr25519};
-    use runtime_primitives::{
-        BuildStorage, traits::{BlakeTwo256, IdentityLookup},
-        testing::{Digest, DigestItem, Header}
+    use frame_support::{
+        impl_outer_origin, impl_outer_event, impl_outer_dispatch, assert_ok,
+        parameter_types, weights::Weight,
     };
+    use std::cell::RefCell;
+    //use sp_io::{with_externalities, TestExternalities};
+    use sp_core::{Blake2Hasher, sr25519};
+    use sp_runtime::{
+        BuildStorage, traits::{BlakeTwo256, IdentityLookup},
+        testing::{Digest, DigestItem, Header, H256},
+        Perbill,
+    };
+    use sp_version::RuntimeVersion;
 
     mod nftregistry {
         // Re-export contents of the root. This basically
         // needs to give a name for the current crate.
         // This hack is required for `impl_outer_event!`.
         pub use super::super::*;
-        use support::impl_outer_event;
+        use frame_support::impl_outer_event;
     }
 
     #[derive(Eq, Clone, PartialEq)]
@@ -183,69 +189,201 @@ mod tests {
         pub enum Origin for NftRegistryTest {}
     }
 
+    impl_outer_dispatch! {
+        pub enum Call for NftRegistryTest where origin: Origin {
+            balances::Balances,
+            contracts::Contract,
+            nftregistry::NftRegistry,
+        }
+    }
+
     impl_outer_event! {
         pub enum MetaEvent for NftRegistryTest {
             balances<T>, contracts<T>, nftregistry<T>,
         }
     }
 
-    /*
-    use crate::{Balances, Contract, NftRegistry};
-    impl_outer_dispatch! {
-        pub enum Call for Test where origin: Origin {
-            balances::Balances,
-            contract::Contract,
-            nftregistry::NftRegistry,
-        }
+    type BlockNumber = u64;
+
+    parameter_types! {
+        pub const BlockHashCount: BlockNumber = 250;
+        pub const MaximumBlockWeight: Weight = 1_000_000;
+        pub const AvailableBlockRatio: Perbill = Perbill::from_percent(75);
+        pub const MaximumBlockLength: u32 = 5 * 1024 * 1024;
     }
-    */
 
     impl system::Trait for NftRegistryTest {
-        type Origin = Origin;
-        type Index = u64;
-        type BlockNumber = u64;
-        type Hash = H256;
-        type Hashing = BlakeTwo256;
-        type Digest = Digest;
+        type Call = ();
         type AccountId = super::super::AccountId;
         type Lookup = IdentityLookup<Self::AccountId>;
+        type Index = u64;
+        type BlockNumber = BlockNumber;
+        type Hash = H256;
+        type Hashing = BlakeTwo256;
         type Header = Header;
         type Event = MetaEvent;
-        type Log = DigestItem;
+        type Origin = Origin;
+        type BlockHashCount = BlockHashCount;
+        type MaximumBlockWeight = MaximumBlockWeight;
+        type MaximumBlockLength = MaximumBlockLength;
+        type AvailableBlockRatio = AvailableBlockRatio;
+        type Version = ();
+    }
+
+    parameter_types! {
+        pub const ExistentialDeposit: u64 = 500;
+        pub const TransferFee: u64 = 0;
+        pub const CreationFee: u64 = 0;
     }
 
     impl balances::Trait for NftRegistryTest {
         type Balance = u64;
-        type OnFreeBalanceZero = ();
+        type OnFreeBalanceZero = contracts::Module<NftRegistryTest>;
         type OnNewAccount = ();
         type Event = MetaEvent;
-        type TransactionPayment = ();
-        type TransferPayment = ();
         type DustRemoval = ();
+        type TransferPayment = ();
+        type ExistentialDeposit = ExistentialDeposit;
+        type TransferFee = TransferFee;
+        type CreationFee = CreationFee;
+    }
+
+    parameter_types! {
+        pub const MinimumPeriod: u64 = 1;
     }
 
     impl timestamp::Trait for NftRegistryTest {
         type Moment = u64;
         type OnTimestampSet = ();
+        type MinimumPeriod = MinimumPeriod;
+    }
+    parameter_types! {
+        pub const SignedClaimHandicap: u32 = 2;
+        pub const TombstoneDeposit: u64 = 16;
+        pub const StorageSizeOffset: u32 = 8;
+        pub const RentByteFee: u64 = 4;
+        pub const RentDepositOffset: u64 = 10_000;
+        pub const SurchargeReward: u64 = 150;
+        pub const TransactionBaseFee: u64 = 2;
+        pub const TransactionByteFee: u64 = 6;
+        pub const ContractFee: u64 = 21;
+        pub const CallBaseFee: u64 = 135;
+        pub const InstantiateBaseFee: u64 = 175;
+        pub const MaxDepth: u32 = 100;
+        pub const MaxValueSize: u32 = 16_384;
+        pub const BlockGasLimit: u64 = 100_000;
     }
 
+    pub struct ExtBuilder {
+        existential_deposit: u64,
+        gas_price: u64,
+        block_gas_limit: u64,
+        transfer_fee: u64,
+        instantiation_fee: u64,
+    }
+    impl Default for ExtBuilder {
+        fn default() -> Self {
+            Self {
+                existential_deposit: 0,
+                gas_price: 2,
+                block_gas_limit: 100_000_000,
+                transfer_fee: 0,
+                instantiation_fee: 0,
+            }
+        }
+    }
+    thread_local! {
+        static EXISTENTIAL_DEPOSIT: RefCell<u64> = RefCell::new(0);
+        static TRANSFER_FEE: RefCell<u64> = RefCell::new(0);
+        static INSTANTIATION_FEE: RefCell<u64> = RefCell::new(0);
+        static BLOCK_GAS_LIMIT: RefCell<u64> = RefCell::new(0);
+    }
+    impl ExtBuilder {
+        pub fn existential_deposit(mut self, existential_deposit: u64) -> Self {
+            self.existential_deposit = existential_deposit;
+            self
+        }
+        pub fn gas_price(mut self, gas_price: u64) -> Self {
+            self.gas_price = gas_price;
+            self
+        }
+        pub fn block_gas_limit(mut self, block_gas_limit: u64) -> Self {
+            self.block_gas_limit = block_gas_limit;
+            self
+        }
+        pub fn transfer_fee(mut self, transfer_fee: u64) -> Self {
+            self.transfer_fee = transfer_fee;
+            self
+        }
+        pub fn instantiation_fee(mut self, instantiation_fee: u64) -> Self {
+            self.instantiation_fee = instantiation_fee;
+            self
+        }
+        pub fn set_associated_consts(&self) {
+            EXISTENTIAL_DEPOSIT.with(|v| *v.borrow_mut() = self.existential_deposit);
+            TRANSFER_FEE.with(|v| *v.borrow_mut() = self.transfer_fee);
+            INSTANTIATION_FEE.with(|v| *v.borrow_mut() = self.instantiation_fee);
+            BLOCK_GAS_LIMIT.with(|v| *v.borrow_mut() = self.block_gas_limit);
+        }
+        pub fn build(self) -> sp_io::TestExternalities {
+            self.set_associated_consts();
+            let mut t = system::GenesisConfig::default().build_storage::<NftRegistryTest>().unwrap();
+            balances::GenesisConfig::<NftRegistryTest> {
+                balances: vec![],
+                vesting: vec![],
+            }.assimilate_storage(&mut t).unwrap();
+            contracts::GenesisConfig::<NftRegistryTest> {
+                current_schedule: contracts::Schedule {
+                    enable_println: true,
+                    ..Default::default()
+                },
+                gas_price: self.gas_price.into(),
+            }.assimilate_storage(&mut t).unwrap();
+            sp_io::TestExternalities::new(t)
+        }
+    }
+
+    type Timestamp = timestamp::Module<NftRegistryTest>;
+    type NftReg = super::Module<NftRegistryTest>;
+    type Balances = balances::Module<NftRegistryTest>;
+    type Contract = contracts::Contract<NftRegistryTest>;
+
     impl contracts::Trait for NftRegistryTest {
-        type Currency = crate::Balances;
-        type Call = contracts::Call<NftRegistryTest>;
+        //type Currency = crate::Balances;
+        type Currency = Balances;
+        type Time = Timestamp;
+        type Randomness = randomness_collective_flip::Module<NftRegistryTest>;
+        //type Call = Call<NftRegistryTest>;
+        type Call = Call;
         type Event = MetaEvent;
-        type Gas = u64;
         type DetermineContractAddress = contracts::SimpleAddressDeterminator<NftRegistryTest>;
         type ComputeDispatchFee = contracts::DefaultDispatchFeeComputor<NftRegistryTest>;
         type TrieIdGenerator = contracts::TrieIdFromParentCounter<NftRegistryTest>;
         type GasPayment = ();
+        type RentPayment = ();
+        type SignedClaimHandicap = SignedClaimHandicap;
+        type TombstoneDeposit = TombstoneDeposit;
+        type StorageSizeOffset = StorageSizeOffset;
+        type RentByteFee = RentByteFee;
+        type RentDepositOffset = RentDepositOffset;
+        type SurchargeReward = SurchargeReward;
+        type TransferFee = TransferFee;
+        type CreationFee = CreationFee;
+        type TransactionBaseFee = TransactionBaseFee;
+        type TransactionByteFee = TransactionByteFee;
+        type ContractFee = ContractFee;
+        type CallBaseFee = CallBaseFee;
+        type InstantiateBaseFee = InstantiateBaseFee;
+        type MaxDepth = MaxDepth;
+        type MaxValueSize = MaxValueSize;
+        type BlockGasLimit = BlockGasLimit;
     }
 
     impl super::Trait for NftRegistryTest {
         type Event = MetaEvent;
     }
 
-    type NftReg = super::Module<NftRegistryTest>;
-
+    /*
     fn build_ext() -> TestExternalities<Blake2Hasher> {
         let mut t = system::GenesisConfig::<NftRegistryTest>::default().build_storage().unwrap().0;
         t.extend(balances::GenesisConfig::<NftRegistryTest>::default().build_storage().unwrap().0);
@@ -266,13 +404,14 @@ mod tests {
         t.extend(contracts::GenesisConfig::<NftRegistryTest>::default().build_storage().unwrap().0);
         t.into()
     }
+    */
 
     fn init_contract(origin: Origin) -> Result {
         use std::{io, io::prelude::*, fs::File};
         use std::path::Path;
 
         // Get the wasm contract byte code from a file
-        let mut f = File::open(Path::new("./test_wasm/testcontract.wasm"))
+        let mut f = File::open(Path::new("./testcontract.wasm"))
             .map_err(|_| "Failed to open contract file")?;
         let mut bytecode = Vec::<u8>::new();
         f.read_to_end(&mut bytecode)
@@ -295,14 +434,15 @@ mod tests {
         }.ok_or("Latest event is not a CodeStored event")?;
 
         // Initialize as contract
-        <contracts::Module<NftRegistryTest>>::create(origin, 0, 200_000, codehash, vec![])
+        <contracts::Module<NftRegistryTest>>::instantiate(origin, 0, 200_000, codehash, vec![])
     }
 
     #[test]
     fn create_nft_registry() {
-        with_externalities(&mut build_ext(), || {
-            let h1 = sr25519::Public::from_h256((1).using_encoded(<NftRegistryTest as system::Trait>::Hashing::hash));
-            let h2 = sr25519::Public::from_h256((2).using_encoded(<NftRegistryTest as system::Trait>::Hashing::hash));
+        ExtBuilder::default().build().execute_with(|| {
+        //with_externalities(&mut build_ext(), || {
+            //let h1 = sr25519::Public::from_h256((1_u32).using_encoded(<NftRegistryTest as system::Trait>::Hashing::hash));
+            //let h2 = sr25519::Public::from_h256((2_u32).using_encoded(<NftRegistryTest as system::Trait>::Hashing::hash));
             let origin = Origin::signed(h1.clone());
 
             println!("Free bal: {}", <balances::Module<NftRegistryTest>>::free_balance(&h1.clone()));
