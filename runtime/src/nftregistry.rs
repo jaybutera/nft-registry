@@ -158,17 +158,15 @@ decl_module! {
 
 #[cfg(test)]
 mod tests {
-    //use sp_std::prelude::*;
     use super::*;
     use frame_support::{
         impl_outer_origin, impl_outer_event, impl_outer_dispatch, assert_ok,
-        parameter_types, weights::Weight,
+        parameter_types, weights::Weight, traits::Currency,
     };
     use std::cell::RefCell;
-    //use sp_io::{with_externalities, TestExternalities};
     use sp_core::{Blake2Hasher, sr25519};
     use sp_runtime::{
-        BuildStorage, traits::{BlakeTwo256, IdentityLookup},
+        BuildStorage, traits::{BlakeTwo256, IdentityLookup, Hash},
         testing::{Digest, DigestItem, Header, H256},
         Perbill,
     };
@@ -215,7 +213,7 @@ mod tests {
 
     impl system::Trait for NftRegistryTest {
         type Call = ();
-        type AccountId = u64;//super::super::AccountId;
+        type AccountId = u64;
         type Lookup = IdentityLookup<Self::AccountId>;
         type Index = u64;
         type BlockNumber = BlockNumber;
@@ -351,18 +349,13 @@ mod tests {
     type NftRegistry = super::Module<NftRegistryTest>;
 
     impl contracts::Trait for NftRegistryTest {
-        //type Currency = crate::Balances;
         type Currency = Balances;
         type Time = Timestamp;
         type Randomness = randomness_collective_flip::Module<NftRegistryTest>;
-        //type Call = Call<NftRegistryTest>;
         type Call = Call;
         type Event = MetaEvent;
-        //type DetermineContractAddress = contracts::SimpleAddressDeterminator<NftRegistryTest>;
         type DetermineContractAddress = DummyContractAddressFor;
-        //type ComputeDispatchFee = contracts::DefaultDispatchFeeComputor<NftRegistryTest>;
         type ComputeDispatchFee = DummyComputeDispatchFee;
-        //type TrieIdGenerator = contracts::TrieIdFromParentCounter<NftRegistryTest>;
         type TrieIdGenerator = DummyTrieIdGenerator;
         type GasPayment = ();
         type RentPayment = ();
@@ -406,7 +399,6 @@ mod tests {
                 *v
             });
 
-            // TODO: see https://github.com/paritytech/substrate/issues/2325
             let mut res = vec![];
             res.extend_from_slice(well_known_keys::CHILD_STORAGE_KEY_PREFIX);
             res.extend_from_slice(b"default:");
@@ -429,7 +421,7 @@ mod tests {
     const CHARLIE: u64 = 3;
     const DJANGO: u64 = 4;
 
-    fn init_contract(origin: Origin) -> Result {
+    fn get_wasm_bytecode() -> std::result::Result<Vec<u8>, &'static str> {
         use std::{io, io::prelude::*, fs::File};
         use std::path::Path;
 
@@ -438,7 +430,13 @@ mod tests {
             .map_err(|_| "Failed to open contract file")?;
         let mut bytecode = Vec::<u8>::new();
         f.read_to_end(&mut bytecode)
-            .map_err(|_| "Didn't read to end of file")?;
+            .map(|_| bytecode)
+            .map_err(|_| "Didn't read to end of file")
+    }
+
+    fn init_contract(origin: Origin) -> Result {
+        let bytecode = get_wasm_bytecode()?;
+        //let codehash = (bytecode).using_encoded(<T as system::Trait>::Hashing::hash);
 
         // Store code on chain
         <contracts::Module<NftRegistryTest>>::put_code(
@@ -456,19 +454,36 @@ mod tests {
             _ => None,
         }.ok_or("Latest event is not a CodeStored event")?;
 
+        println!("codehash: {:?}", codehash.clone());
         // Initialize as contract
-        <contracts::Module<NftRegistryTest>>::instantiate(origin, 0, 200_000, codehash, vec![])
+        <contracts::Module<NftRegistryTest>>::instantiate(origin, 1_000, 100_000, codehash, vec![])
+
+        /*
+        let keccak = ink_utils::hash::keccak256("validate".as_bytes());
+        let selector = [keccak[3], keccak[2], keccak[1], keccak[0]];
+        //let s = codec::Encode::encode(&String::from("fn validate(&mut self, nft_class_id: &AccountId)"));
+        //let selector = <NftRegistryTest as system::Trait>::Hashing::hash(&s.as_slice())[0..3];
+
+        Contract::call(
+            Origin::signed(ALICE),
+            BOB,
+            0,
+            100_000_000,
+            selector.to_vec())
+            */
     }
 
     #[test]
     fn create_nft_registry() {
-        ExtBuilder::default().existential_deposit(100).build().execute_with(|| {
-            //Balances::deposit_creating(&ALICE, 100_000_000);
+        ExtBuilder::default().build().execute_with(|| {
+            Balances::deposit_creating(&ALICE, 800_000_000_000);
             let origin = Origin::signed(ALICE);
 
             println!("Free bal: {}", <balances::Module<NftRegistryTest>>::free_balance(&ALICE));
 
-            init_contract( origin.clone() );
+            assert_ok!(
+                init_contract( origin.clone() )
+            );
 
             assert_ok!(
                 NftReg::new_registry(origin,BOB)

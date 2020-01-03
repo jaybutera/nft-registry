@@ -184,3 +184,6 @@ default-features = false
 git = 'https://github.com/paritytech/substrate.git'
 package = 'pallet-transaction-payment'
 rev = '40a16efefc070faf5a25442bc3ae1d0ea2478eee'
+
+[dev-dependencies]
+ink_utils = { git = "https://github.com/paritytech/ink", package = "ink_utils", version = "0.1" }
