@@ -187,3 +187,5 @@ rev = '40a16efefc070faf5a25442bc3ae1d0ea2478eee'
 
 [dev-dependencies]
 ink_utils = { git = "https://github.com/paritytech/ink", package = "ink_utils", version = "0.1" }
+ink_core = { git = "https://github.com/paritytech/ink", package = "ink_core", version = "0.1" }
+wabt = "0.9.2"

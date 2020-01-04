@@ -172,6 +172,7 @@ mod tests {
     };
     use sp_version::RuntimeVersion;
     use contracts::{TrieIdGenerator, TrieId, ComputeDispatchFee, ContractAddressFor, AccountCounter};
+    use ink_core::env2::call::{Selector, CallData};
 
     mod nftregistry {
         // Re-export contents of the root. This basically
@@ -420,6 +421,138 @@ mod tests {
     const BOB: u64 = 2;
     const CHARLIE: u64 = 3;
     const DJANGO: u64 = 4;
+    const CODE_SET_RENT: &str = r#"
+(module
+	(import "env" "ext_dispatch_call" (func $ext_dispatch_call (param i32 i32)))
+	(import "env" "ext_set_storage" (func $ext_set_storage (param i32 i32 i32 i32)))
+	(import "env" "ext_set_rent_allowance" (func $ext_set_rent_allowance (param i32 i32)))
+	(import "env" "ext_scratch_size" (func $ext_scratch_size (result i32)))
+	(import "env" "ext_scratch_read" (func $ext_scratch_read (param i32 i32 i32)))
+	(import "env" "memory" (memory 1 1))
+	;; insert a value of 4 bytes into storage
+	(func $call_0
+		(call $ext_set_storage
+			(i32.const 1)
+			(i32.const 1)
+			(i32.const 0)
+			(i32.const 4)
+		)
+	)
+	;; remove the value inserted by call_1
+	(func $call_1
+		(call $ext_set_storage
+			(i32.const 1)
+			(i32.const 0)
+			(i32.const 0)
+			(i32.const 0)
+		)
+	)
+	;; transfer 50 to ALICE
+	(func $call_2
+		(call $ext_dispatch_call
+			(i32.const 68)
+			(i32.const 11)
+		)
+	)
+	;; do nothing
+	(func $call_else)
+	(func $assert (param i32)
+		(block $ok
+			(br_if $ok
+				(get_local 0)
+			)
+			(unreachable)
+		)
+	)
+	;; Dispatch the call according to input size
+	(func (export "call")
+		(local $input_size i32)
+		(set_local $input_size
+			(call $ext_scratch_size)
+		)
+		(block $IF_ELSE
+			(block $IF_2
+				(block $IF_1
+					(block $IF_0
+						(br_table $IF_0 $IF_1 $IF_2 $IF_ELSE
+							(get_local $input_size)
+						)
+						(unreachable)
+					)
+					(call $call_0)
+					return
+				)
+				(call $call_1)
+				return
+			)
+			(call $call_2)
+			return
+		)
+		(call $call_else)
+	)
+	;; Set into storage a 4 bytes value
+	;; Set call set_rent_allowance with input
+	(func (export "deploy")
+		(local $input_size i32)
+		(set_local $input_size
+			(call $ext_scratch_size)
+		)
+		(call $ext_set_storage
+			(i32.const 0)
+			(i32.const 1)
+			(i32.const 0)
+			(i32.const 4)
+		)
+		(call $ext_scratch_read
+			(i32.const 0)
+			(i32.const 0)
+			(get_local $input_size)
+		)
+		(call $ext_set_rent_allowance
+			(i32.const 0)
+			(get_local $input_size)
+		)
+	)
+	;; Encoding of 10 in balance
+	(data (i32.const 0) "\28")
+	;; Encoding of call transfer 50 to CHARLIE
+	(data (i32.const 68) "\00\00\03\00\00\00\00\00\00\00\C8")
+)
+"#;
+
+    const CODE_DISPATCH_CALL: &str = r#"
+(module
+	(import "env" "ext_dispatch_call" (func $ext_dispatch_call (param i32 i32)))
+	(import "env" "memory" (memory 1 1))
+	(func (export "call")
+		(call $ext_dispatch_call
+			(i32.const 8) ;; Pointer to the start of encoded call buffer
+			(i32.const 11) ;; Length of the buffer
+		)
+	)
+	(func (export "deploy"))
+	(data (i32.const 8) "\00\00\03\00\00\00\00\00\00\00\C8")
+)
+"#;
+
+    use ink_core::env2::EnvTypes;
+    impl EnvTypes for NftRegistryTest {
+        type AccountId = <NftRegistryTest as system::Trait>::AccountId;
+        type Balance = <NftRegistryTest as balances::Trait>::Balance;
+        type Hash = <NftRegistryTest as system::Trait>::Hash;
+        type Moment = <NftRegistryTest as timestamp::Trait>::Moment;
+        type BlockNumber = <NftRegistryTest as system::Trait>::BlockNumber;
+        type Call = <NftRegistryTest as system::Trait>::Call;
+    }
+
+    fn compile_module<T>(wabt_module: &str)
+        -> std::result::Result<(Vec<u8>, <T::Hashing as Hash>::Output), wabt::Error>
+        where T: system::Trait
+    {
+        let wasm = wabt::wat2wasm(wabt_module)?;
+        let code_hash = T::Hashing::hash(&wasm);
+        Ok((wasm, code_hash))
+    }
 
     fn get_wasm_bytecode() -> std::result::Result<Vec<u8>, &'static str> {
         use std::{io, io::prelude::*, fs::File};
@@ -436,14 +569,15 @@ mod tests {
 
     fn init_contract(origin: Origin) -> Result {
         let bytecode = get_wasm_bytecode()?;
+        //let codehash = <NftRegistryTest as system::Trait>::Hashing::hash(&bytecode);
         //let codehash = (bytecode).using_encoded(<T as system::Trait>::Hashing::hash);
+        //let (bytecode, codehash) = compile_module::<NftRegistryTest>(CODE_SET_RENT).unwrap();
 
         // Store code on chain
         <contracts::Module<NftRegistryTest>>::put_code(
             origin.clone(),
             100_000,
             bytecode
-            //0x14144020u32.to_le_bytes().to_vec()
             )?;
 
         // Get codehash from event log
@@ -455,29 +589,17 @@ mod tests {
         }.ok_or("Latest event is not a CodeStored event")?;
 
         println!("codehash: {:?}", codehash.clone());
-        // Initialize as contract
-        <contracts::Module<NftRegistryTest>>::instantiate(origin, 1_000, 100_000, codehash, vec![])
 
-        /*
-        let keccak = ink_utils::hash::keccak256("validate".as_bytes());
-        let selector = [keccak[3], keccak[2], keccak[1], keccak[0]];
-        //let s = codec::Encode::encode(&String::from("fn validate(&mut self, nft_class_id: &AccountId)"));
-        //let selector = <NftRegistryTest as system::Trait>::Hashing::hash(&s.as_slice())[0..3];
-
-        Contract::call(
-            Origin::signed(ALICE),
-            BOB,
-            0,
-            100_000_000,
-            selector.to_vec())
-            */
+        // Instantiate contract
+        <contracts::Module<NftRegistryTest>>::instantiate(origin, 1_000, 100_000, codehash, codec::Encode::encode(&ALICE))
     }
 
     #[test]
     fn create_nft_registry() {
         ExtBuilder::default().build().execute_with(|| {
-            Balances::deposit_creating(&ALICE, 800_000_000_000);
+            Balances::deposit_creating(&ALICE, 100_000_000);
             let origin = Origin::signed(ALICE);
+            let registry_id = 0;
 
             println!("Free bal: {}", <balances::Module<NftRegistryTest>>::free_balance(&ALICE));
 
@@ -485,9 +607,51 @@ mod tests {
                 init_contract( origin.clone() )
             );
 
+            // Call validation contract method
+            let mut call = CallData::new( Selector::from_str("validate") );
+            call.push_arg(&registry_id);
+
+            let bytecode = get_wasm_bytecode().unwrap();
+            let codehash = <NftRegistryTest as system::Trait>::Hashing::hash(&bytecode);
+
+            /*
+            use codec::Encode;
+            let keccak = ink_utils::hash::keccak256("validate".as_bytes());
+            let selector = [keccak[3], keccak[2], keccak[1], keccak[0]];
+            let mut call = selector.encode();
+            call.append( &mut Encode::encode(&registry_id) );
+            */
+
+            let addr = <NftRegistryTest as contracts::Trait>::DetermineContractAddress::contract_address_for(
+                &codehash,
+                //&call,
+                &call.to_bytes(),
+                &ALICE);
+
+            println!("Contract address: {:?}", addr);
+
             assert_ok!(
-                NftReg::new_registry(origin,BOB)
+                NftReg::new_registry(origin.clone(), addr)
             );
+
+            println!("Call: {:?}", call);
+
+            assert_ok!(
+                NftReg::mint(origin, registry_id, call.to_bytes().to_vec(), 0, 100_000)
+            );
+            /*
+            println!("Call: {:?}", call);
+            assert_ok!(
+                Contract::call(
+                    Origin::signed(ALICE),
+                    addr,
+                    0,
+                    100_000,
+                    //call)
+                    call.to_bytes().to_vec())
+                    //selector.to_vec())
+            );
+            */
 
             println!("Event log:");
             for e in &<system::Module<NftRegistryTest>>::events() {
