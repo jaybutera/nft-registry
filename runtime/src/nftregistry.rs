@@ -78,30 +78,6 @@ decl_module! {
             Ok(())
         }
 
-        /*
-        fn upload_validation_contract(
-            origin,
-            gas: T::Gas) -> Result
-        {
-            let sender = ensure_signed(origin)?;
-
-            // Store bytecode
-            let codehash = <contract::Module<T>>::put_code(
-                T::Origin::from(RawOrigin::<T::AccountId>::Signed(sender.clone())),
-                gas,
-                //<T::Gas as As<u32>>::sa(210000),
-                bytecode)?;
-
-            // Initialize contract
-            <contract::Module<T>>::create(
-                T::Origin::from(RawOrigin::<T::AccountId>::Signed(sender.clone())),
-                value,
-                gas,
-                codehash,
-                data)?;
-        }
-        */
-
         fn mint(origin,
                 uid: RegistryUid,
                 parameters: Vec<u8>,            // To be passed into the smart contract
@@ -121,14 +97,11 @@ decl_module! {
 
             // Wasm contract should emit an event for success or failure
             <contracts::Module<T>>::call(
-                // Origin::signed( sender.clone() ),
-                T::Origin::from(RawOrigin::<T::AccountId>::Signed(sender.clone())),
+                T::Origin::from(RawOrigin::<T::AccountId>::Signed(sender)),
                 T::Lookup::unlookup(validation_fn.clone()),
                 value,
                 gas_limit,
-                parameters)?;
-
-            Ok(())
+                parameters)
         }
 
         fn finish_mint(origin, uid: RegistryUid) -> Result {
@@ -535,16 +508,6 @@ mod tests {
 )
 "#;
 
-    use ink_core::env2::EnvTypes;
-    impl EnvTypes for NftRegistryTest {
-        type AccountId = <NftRegistryTest as system::Trait>::AccountId;
-        type Balance = <NftRegistryTest as balances::Trait>::Balance;
-        type Hash = <NftRegistryTest as system::Trait>::Hash;
-        type Moment = <NftRegistryTest as timestamp::Trait>::Moment;
-        type BlockNumber = <NftRegistryTest as system::Trait>::BlockNumber;
-        type Call = <NftRegistryTest as system::Trait>::Call;
-    }
-
     fn compile_module<T>(wabt_module: &str)
         -> std::result::Result<(Vec<u8>, <T::Hashing as Hash>::Output), wabt::Error>
         where T: system::Trait
@@ -558,6 +521,7 @@ mod tests {
         use std::{io, io::prelude::*, fs::File};
         use std::path::Path;
 
+        /*
         // Get the wasm contract byte code from a file
         let mut f = File::open(Path::new("./testcontract.wasm"))
             .map_err(|_| "Failed to open contract file")?;
@@ -565,6 +529,10 @@ mod tests {
         f.read_to_end(&mut bytecode)
             .map(|_| bytecode)
             .map_err(|_| "Didn't read to end of file")
+        */
+
+        let (bytecode, codehash) = compile_module::<NftRegistryTest>(CODE_SET_RENT).unwrap();
+        Ok(bytecode)
     }
 
     fn init_contract(origin: Origin) -> Result {
@@ -592,6 +560,7 @@ mod tests {
 
         // Instantiate contract
         <contracts::Module<NftRegistryTest>>::instantiate(origin, 1_000, 100_000, codehash, codec::Encode::encode(&ALICE))
+        //<contracts::Module<NftRegistryTest>>::instantiate(origin, 1_000, 100_000, codehash, vec![])
     }
 
     #[test]
@@ -609,6 +578,7 @@ mod tests {
 
             // Call validation contract method
             let mut call = CallData::new( Selector::from_str("validate") );
+            call.push_arg(&codec::Encode::encode(&ALICE));
             call.push_arg(&registry_id);
 
             let bytecode = get_wasm_bytecode().unwrap();
@@ -624,8 +594,7 @@ mod tests {
 
             let addr = <NftRegistryTest as contracts::Trait>::DetermineContractAddress::contract_address_for(
                 &codehash,
-                //&call,
-                &call.to_bytes(),
+                &codec::Encode::encode(&ALICE),
                 &ALICE);
 
             println!("Contract address: {:?}", addr);
@@ -639,6 +608,17 @@ mod tests {
             assert_ok!(
                 NftReg::mint(origin, registry_id, call.to_bytes().to_vec(), 0, 100_000)
             );
+            /*
+            let res = <contracts::Module<NftRegistryTest>>::bare_call(
+                ALICE,
+                addr,
+                0,
+                100_000,
+                codec::Encode::encode(&call));
+                //call.to_bytes().to_vec());
+            */
+
+            //println!("Call result: {:?}", res.ok().map(|r| r.data));
             /*
             println!("Call: {:?}", call);
             assert_ok!(
