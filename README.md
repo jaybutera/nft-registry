@@ -184,16 +184,22 @@ considered to be used within the substrate runtime. I say this because the
 interface uses an `Env` type to construct contract types in the [`create_using`](https://github.com/paritytech/ink/blob/master/core/src/env2/call/create.rs#L214) method.
 Though `Env` could certainly be implemented by the substrate Runtime struct
 with some work, there is also a way to bypass the Env via the
-[`FromAccountId`](https://github.com/paritytech/ink/blob/master/core/src/env2/call/create.rs#L49) trait which should be able to construct a Contract from just the address like so:
+[`FromAccountId`](https://github.com/paritytech/ink/blob/master/core/src/env2/call/create.rs#L49) trait which should be able to construct a Contract from just the address.
+Simply implement the ink trait, `EnvTypes`, for the test runtime struct and
+implement `FromAccountId<NftRegistryTest> for Testcontract`.
 
 ```rust
 Testcontract::from_account_id( contract_addr )
 ```
 
-Currently I'm getting an error of incompatible ink_core versions when using
-this trait. It's an unfinished avenue to explore but its certainly the case
-that this code was not made for this use and so there may be more issues to
-solve.
+This is done in the code but currently I'm getting an error of incompatible ink_core versions of the
+`AccountId` in the Testcontract constructor. This stems from the fact that the
+test environment is using u64 for AccountIds and ink! has a hardcoded `struct
+AccountId([u8;32])`, which may be the reason for confusion in encoding.
+
+It's an unfinished avenue to explore but its certainly the case
+that this code was not made to be used in this way and so there may be more issues to
+solve if this path is continued.
 
 ### Tests
 There are two complete tests in
